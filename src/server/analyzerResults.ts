@@ -32,6 +32,7 @@ export class AnalyzerResults {
     reports: Map<string, string> = new Map<string, string>();
     config: RhamtConfiguration;
     jsonResults: any;
+    
     private _model: AnalyzerResults.Model;
      
    
@@ -88,7 +89,6 @@ export class AnalyzerResults {
                                     origin: '',
                                     variables: incident.variables ? incident.variables: '',
                                 };
-                                
                                 outputChannel1.appendLine (`Hint: ${JSON.stringify(hint.variables, null, 2)}`);
                                 this.model.hints.push(hint);
                                 const existingHintsForFile = this._model.issueByFile.get(fileUri.fsPath);

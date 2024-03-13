@@ -181,11 +181,6 @@
                 "category": "MTA",
                 "command": "rhamt.kai",
                 "title": "Generate Kai-Fix"
-            },
-            {
-                "category": "MTA",
-                "command": "rhamt.Kai-Fix-Files",
-                "title": "Kai-Fix All"
             }
         ],
         "configuration": [
@@ -318,11 +313,6 @@
                     "command": "rhamt.kai",
                     "when": "view == rhamtExplorerView && viewItem =~ /issue/i",
                     "group": "rhamt@3"
-                },
-                {
-                    "command": "rhamt.Kai-Fix-Files",
-                    "when": "view == rhamtExplorerView && viewItem =~ /file/i",
-                    "group": "rhamt@0"
                 },
                 {
                     "command": "rhamt.activate",
