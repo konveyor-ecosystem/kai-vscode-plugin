@@ -16,7 +16,7 @@ This plugin will allow you to:
 Note: The plugin is not currently available in the marketplace. Please follow the installation instructions provided [here](docs/user-guide.md).
  
 ## License
-[MIT](LICENSE)
+[Eclipse Public License - v 2.0](LICENSE)
 
 ## Code of Conduct
 
