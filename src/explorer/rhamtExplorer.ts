@@ -235,18 +235,31 @@ export class RhamtExplorer {
         this.dataProvider.context.subscriptions.push(commands.registerCommand('rhamt.rerun', async (item) => {
             window.showInformationMessage(`rerun`);
             const fileNode = item as FileNode;
+            if (!fileNode) {
+                window.showErrorMessage('Invalid file node.');
+                return;
+            }
+        
             fileNode.setInProgress(true, "analyzing");
             const config = fileNode.config as RhamtConfiguration;
             const libPath = path.join(this.dataProvider.context.extensionPath, 'lib');
             const filePath = this.getRelativePath(fileNode.file, config.options['input'][0]);
-            const newOutputPath =  await this.createDirectoryForFile(config.options['output'],filePath);
+            const fileName = path.basename(filePath, path.extname(filePath));
+        
+            const newOutputPath = await this.createDirectoryForFile(config.options['output'], fileName);
             window.showInformationMessage(`newOutputPath : ${newOutputPath}`);
+        
+            const relativeFilePath = path.relative(config.options['input'][0], fileNode.file);
+            window.showInformationMessage(`Relative file path: ${relativeFilePath}`);
+        
             try {
-                //AnalyzerUtil.updateRunEnablement(false, this.dataProvider, config);
                 const providers = LocalProviderRunner.getInstance().providers();
-
-                await writeProviderSettingsFile(newOutputPath,
-                    getProviderConfigs(providers, libPath, config.options['input'], filePath));
+        
+                await writeProviderSettingsFile(
+                    newOutputPath,
+                    getProviderConfigs(providers, libPath, config.options['input'], relativeFilePath)
+                );
+        
                 await AnalyzerUtil.analyze(
                     newOutputPath,
                     true,
@@ -257,50 +270,147 @@ export class RhamtExplorer {
                         config.results = undefined;
                         config.summary = undefined;
                     },
-                    () => {});
+                    () => {}
+                );
+        
                 if (config.cancelled) {
                     rhamtChannel.print(`\n Analysis canceled for File: ${filePath}`);
                     return;
-                };
+                }
             } catch (e) {
                 console.log(e);
                 rhamtChannel.print(`\n Analysis failed for File: ${filePath}`);
-                if (!e.notified) {
-                    window.showErrorMessage(`Error running analysis - ${e}`);
+                if (e.message) {
+                    window.showErrorMessage(`Error running analysis: ${e.message}`);
                 }
-               //AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
-               this.refreshConfigurations();
-               this.dataProvider.refreshNode(fileNode);
+                fileNode.setInProgress(false);
+                this.dataProvider.refreshNode(fileNode);  // Refresh just this node
+                return;
             }
+        
             try {
                 await AnalyzerUtil.generateStaticReport(libPath, config, newOutputPath);
-                await AnalyzerUtil.loadAnalyzerResults(config, undefined ,newOutputPath);
+                await AnalyzerUtil.loadAnalyzerResults(config, undefined, newOutputPath);
                 AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
-                // const configNode = this.dataProvider.getConfigurationNode(config);
-                // configNode.loadResults();
-                fileNode.refresh();
-                this.refreshConfigurations();
-                this.dataProvider.refreshNode(fileNode);
-                // this.dataProvider.reveal(configNode, true);
-                this.markerService.refreshOpenEditors();
-                this.saveModel();
+        
+                const issueByFileMap = fileNode.getConfig()._results.model.issueByFile;
+                const issueByFile = issueByFileMap.get(fileNode.file);
+                window.showInformationMessage(`Issue By File: ${issueByFile}`);
+        
+                if (!issueByFile) {
+                    this.dataProvider.removeFileNode(fileNode);
+                    window.showInformationMessage(`FileNode removed: ${fileNode.file}`);
+                } else {
+                    fileNode.setIssues(issueByFile);
+                    fileNode.refresh();
+                    this.dataProvider.refreshNode(fileNode);  
+                }
+        
+                this.markerService.refreshOpenEditors(fileNode.file);
+                await this.saveModel();
                 fileNode.setInProgress(false);
                 rhamtChannel.print('\nAnalysis completed successfully');
-
             } catch (e) {
                 console.log(e);
                 rhamtChannel.print('\nStatic report generation failed');
-                if (!e.notified) {
-                    window.showErrorMessage(`Error generating static report - ${e}`);
+                if (e.message) {
+                    window.showErrorMessage(`Error generating static report: ${e.message}`);
                 }
                 AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
-                this.refreshConfigurations();
+                fileNode.setInProgress(false);
+                this.dataProvider.refreshNode(fileNode);  
             }
-
         }));
-
-        AnalyzerUtil.updateRunEnablement(true, this.dataProvider, null);
     }
+        
+    //     this.dataProvider.context.subscriptions.push(commands.registerCommand('rhamt.rerun', async (item) => {
+    //         window.showInformationMessage(`rerun`);
+    //         const fileNode = item as FileNode;
+    //         fileNode.setInProgress(true, "analyzing");
+    //         const config = fileNode.config as RhamtConfiguration;
+    //         const libPath = path.join(this.dataProvider.context.extensionPath, 'lib');
+    //         const filePath = this.getRelativePath(fileNode.file, config.options['input'][0]);
+    //         const fileName = path.basename(filePath, path.extname(filePath));
+
+    //         const newOutputPath =  await this.createDirectoryForFile(config.options['output'],fileName);
+    //         window.showInformationMessage(`newOutputPath : ${newOutputPath}`);
+           
+    //         const relativeFilePath = path.relative(config.options['input'][0], fileNode.file);
+    //         window.showInformationMessage(`Relative file path: ${relativeFilePath}`);
+
+    //         try {
+    //             //AnalyzerUtil.updateRunEnablement(false, this.dataProvider, config);
+    //             const providers = LocalProviderRunner.getInstance().providers();
+
+    //             await writeProviderSettingsFile(newOutputPath,
+    //                 getProviderConfigs(providers, libPath, config.options['input'], relativeFilePath));
+    //             await AnalyzerUtil.analyze(
+    //                 newOutputPath,
+    //                 true,
+    //                 this.dataProvider,
+    //                 config,
+    //                 this.modelService,
+    //                 () => {
+    //                     config.results = undefined;
+    //                     config.summary = undefined;
+    //                 },
+    //                 () => {});
+    //             if (config.cancelled) {
+    //                 rhamtChannel.print(`\n Analysis canceled for File: ${filePath}`);
+    //                 return;
+    //             };
+    //         } catch (e) {
+    //             console.log(e);
+    //             rhamtChannel.print(`\n Analysis failed for File: ${filePath}`);
+    //             if (!e.notified) {
+    //                 window.showErrorMessage(`Error running analysis - ${e}`);
+    //             }
+    //            //AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
+    //            this.refreshConfigurations();
+    //            this.dataProvider.refreshNode(fileNode);
+    //         }
+    //         try {
+    //             await AnalyzerUtil.generateStaticReport(libPath, config, newOutputPath);
+    //             await AnalyzerUtil.loadAnalyzerResults(config, undefined ,newOutputPath);
+    //             AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
+    //             // const configNode = this.dataProvider.getConfigurationNode(config);
+    //             // configNode.loadResults();
+    //             const issueByFileMap = fileNode.getConfig()._results.model.issueByFile;
+    //             const issueByFile = issueByFileMap.get(fileNode.file);
+    //             window.showInformationMessage(`${issueByFile}`);
+    //             if (!issueByFile) {
+             
+    //                 this.dataProvider.removeFileNode(fileNode);
+    //                 window.showInformationMessage(`FileNode removed: ${fileNode.file}`);
+    //                 this.dataProvider.refreshNode(fileNode);
+                  
+    //             } else {
+    //                 fileNode.refresh();
+    //                 this.dataProvider.refreshNode(fileNode);
+    //             }
+
+        
+    //             // this.dataProvider.reveal(configNode, true);
+    //             this.markerService.refreshOpenEditors();
+    //             this.saveModel();
+    //             fileNode.setInProgress(false);
+    //             rhamtChannel.print('\nAnalysis completed successfully');
+
+    //         } catch (e) {
+    //             console.log(e);
+    //             rhamtChannel.print('\nStatic report generation failed');
+    //             if (!e.notified) {
+    //                 window.showErrorMessage(`Error generating static report - ${e}`);
+    //             }
+    //             AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
+    //             //this.refreshConfigurations();
+    //         }
+
+    //     }));
+
+    //     //AnalyzerUtil.updateRunEnablement(true, this.dataProvider, null);
+        
+    // }
 
     private async saveModel(): Promise<void> {
         try {
@@ -336,7 +446,7 @@ export class RhamtExplorer {
             input += '/';
         }
         fullPath.replace(input, '');
-        return path.dirname(fullPath);
+        return path.basename(fullPath);
     }
 
     async  createDirectoryForFile(outputPath: string, inputPath: string) {

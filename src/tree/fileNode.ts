@@ -73,7 +73,10 @@ export class FileNode extends AbstractNode<FileItem> {
     public hasMoreChildren(): boolean {
         return this.children.length > 0;
     }
-
+    public setIssues(newIssues: any[]): void {
+        this.issues = newIssues;
+    }
+    
     refresh(node?: ITreeNode<TreeItem>, type?: string): void {
         this.children = [];
         const ext = path.extname(this.file);

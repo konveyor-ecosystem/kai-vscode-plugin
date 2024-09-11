@@ -96,7 +96,6 @@ export class ProcessController {
         fileProcessMap.set(filePath, { ...currentState, ...state });
     }
     async startTask(request: Requests) {
-        this.outputChannel.appendLine(`Starting task: ${JSON.stringify(request)}`);
         const task = new vscode.Task(
             { type: 'mytask', task: request.name, requestType: request.type, id: request.id },  
             vscode.TaskScope.Workspace,
@@ -121,9 +120,9 @@ export class ProcessController {
         }
         runningTasks.delete(request.id);
         this.updateFileState(request.file, { inProgress: false, taskExecution: undefined }); 
-        this.outputChannel.appendLine(`Completed task: ${JSON.stringify(request)}`);
+        // this.outputChannel.appendLine(`Completed task: ${JSON.stringify(request)}`);
         // Send result back to KaiFixDetails
-        this.kaiFixDetails.handleTaskResult(request.file, result); 
+        this.kaiFixDetails.handleTaskResult(request.file, result, request.type); 
         this.processQueue(); 
     }
 

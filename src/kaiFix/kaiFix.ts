@@ -49,11 +49,10 @@ export class KaiFixDetails {
             }
             vscode.window.showInformationMessage(`fileNodes map size =  ${this._fileNodes.size}`);
             const fileNode = this._fileNodes.get(uri.fsPath); 
-            //const fileMap = this.globalRequestsManager.getFileMap();
             this.modelService.dataProvider.refreshNode(fileNode);
                 const request: Requests = {
                     id: incrementTaskCounter(),
-                    name: undefined,
+                    name: fileNode.file,
                     type: 'kantra',
                     file: fileNode.file,
                     data: fileNode as FileNode
@@ -67,10 +66,6 @@ export class KaiFixDetails {
                                 });  
                         }
                 } else {
-                    vscode.window.showInformationMessage(`No entry exists in Map, so adding...+ ${fileNode.file}`);
-                    // this.modelService.reload();
-                     //const config = fileNode.config; 
-                    // window.showInformationMessage(`config : ${config.name}`);
                     addRequest(request);
                     this.taskProvider.processQueue();
                     
@@ -101,7 +96,7 @@ export class KaiFixDetails {
             const filePath = fileNode.file;
 
             if (this.fileStateMap.get(filePath)?.inProgress) {
-                window.showInformationMessage(`Process already running for file: ${filePath}`);
+                window.showErrorMessage(`Process already running for file: ${filePath}`);
                 return;
             }
 
@@ -157,7 +152,7 @@ export class KaiFixDetails {
 
     }
 
-    public handleTaskResult(filePath: string, result: any) {
+    public handleTaskResult(filePath: string, result: any, requestType: string) {
         if (this.outputChannel) {
             this.outputChannel.appendLine(`Result received for file ${filePath}: ${JSON.stringify(result)}`);
         }
@@ -167,71 +162,82 @@ export class KaiFixDetails {
             window.showErrorMessage(result.error);
             return;
         }
-
-        const responseText = result.result;
-        console.log(responseText);
-
-        const updatedFile = this.extractUpdatedFile(responseText);
-        const virtualDocumentUri = Uri.parse(`${this.kaiScheme}:${filePath}`);
-
-        const total_Reasoning = this.extractTotalReasoning(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Total Reasoning: ---- \n ${total_Reasoning}\n`);
-        }
-
-        const used_prompts = this.extractUsedPrompts(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Used Prompts: ---- \n${used_prompts}\n`);
-        }
-
-        const model_id = this.extractModelID(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Model Id: ---- \n${model_id}\n`);
-        }
-
-        const additional_information = this.extractAdditionalInformation(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Additional Information: ---- \n${additional_information}\n`);
-        }
-
-        const llm_results = this.extractLlmResults(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- LLM Result: ---- \n${llm_results}\n`);
-        }
-
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Updated File: ---- \n${updatedFile}`);
-        }
-
-        const tempFileName = 'Kai-fix-All-' + this.getFileName(filePath);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`Temp Filename: ${tempFileName}.`);
-        }
-
-        this.writeToTempFile(updatedFile, tempFileName).then((tempFileUri) => {
-            this.updateFileState(filePath, { tempFileUri, originalFilePath: filePath });
-
-            commands.executeCommand('vscode.diff', virtualDocumentUri, tempFileUri, `Current ⟷ KaiFix`, {
-                preview: false, // Disable preview mode
-            }).then(() => {
-                const editor = window.activeTextEditor;
-                if (editor) {
-                    this.openedDiffEditors.set(filePath, editor);
-                    this.watchDiffEditorClose();
-                    this.myWebViewProvider.updateWebview(true);
-                }
+        if (requestType === "kai") {
+            const responseText = result.result;
+            console.log(responseText);
+    
+            const updatedFile = this.extractUpdatedFile(responseText);
+            
+            const virtualDocumentUri = Uri.parse(`${this.kaiScheme}:${filePath}`);
+    
+            const total_Reasoning = this.extractTotalReasoning(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Total Reasoning: ---- \n ${total_Reasoning}\n`);
+            }
+    
+            const used_prompts = this.extractUsedPrompts(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Used Prompts: ---- \n${used_prompts}\n`);
+            }
+    
+            const model_id = this.extractModelID(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Model Id: ---- \n${model_id}\n`);
+            }
+    
+            const additional_information = this.extractAdditionalInformation(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Additional Information: ---- \n${additional_information}\n`);
+            }
+    
+            const llm_results = this.extractLlmResults(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- LLM Result: ---- \n${llm_results}\n`);
+            }
+    
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Updated File: ---- \n${updatedFile}`);
+            }
+    
+            const tempFileName = 'Kai-fix-All-' + this.getFileName(filePath);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`Temp Filename: ${tempFileName}.`);
+            }
+    
+            this.writeToTempFile(updatedFile, tempFileName).then((tempFileUri) => {
+                this.updateFileState(filePath, { tempFileUri, originalFilePath: filePath });
+    
+                commands.executeCommand('vscode.diff', virtualDocumentUri, tempFileUri, `Current ⟷ KaiFix`, {
+                    preview: false, // Disable preview mode
+                }).then(() => {
+                    const editor = window.activeTextEditor;
+                    if (editor) {
+                        this.openedDiffEditors.set(filePath, editor);
+                        this.watchDiffEditorClose();
+                        this.myWebViewProvider.updateWebview(true);
+                    }
+                }, error => {
+                    if (this.outputChannel) {
+                        this.outputChannel.appendLine(`Error opening diff view: ${error}`);
+                    }
+                    window.showErrorMessage(`Error opening diff view: ${error}`);
+                });
             }, error => {
                 if (this.outputChannel) {
-                    this.outputChannel.appendLine(`Error opening diff view: ${error}`);
+                    this.outputChannel.appendLine(`Error writing to temp file: ${error}`);
                 }
-                window.showErrorMessage(`Error opening diff view: ${error}`);
+                window.showErrorMessage(`Error writing to temp file: ${error}`);
             });
-        }, error => {
-            if (this.outputChannel) {
-                this.outputChannel.appendLine(`Error writing to temp file: ${error}`);
+        } else if (requestType === "kantra") {
+            const fileNode = this._fileNodes.get(filePath);
+
+            if (fileNode) {
+                console.log(`Refreshing node for file: ${fileNode.file}`); 
+                fileNode.refresh();  
             }
-            window.showErrorMessage(`Error writing to temp file: ${error}`);
-        });
+        }
+
+       
     }
 
     public updateFileNodes(fileNodeMap: Map<string, FileNode>): void {

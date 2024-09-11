@@ -64,7 +64,12 @@ export class DataProvider implements TreeDataProvider<ITreeNode>, Disposable {
     public getParent(element: ITreeNode): ProviderResult<ITreeNode> {
         if (element instanceof ResultsNode) {
             return element.root;
+        } else if (element instanceof FileNode){
+            console.log(`FileNode root type: ${element.root.constructor.name}`);
+            console.log(`Child nodes of the root: ${element.root.getFileNodeMap}`);
+            return element.root;
         }
+        return undefined;
     }
 
     public get onDidChangeTreeData(): Event<ITreeNode> {
@@ -156,6 +161,20 @@ export class DataProvider implements TreeDataProvider<ITreeNode>, Disposable {
 
     public refreshAll(): void {
         this._onDidChangeTreeDataEmitter.fire(undefined); 
+    }
+
+    public removeFileNode(fileNode: FileNode): void {
+        const parentNode = this.getParent(fileNode);
+
+        if (parentNode && parentNode instanceof ConfigurationNode){
+            const fileNodeMap = parentNode.getFileNodeMap();
+            if (fileNodeMap.has(fileNode.file)) {
+                fileNodeMap.delete(fileNode.file);
+            }
+            this.refresh(parentNode);
+        } else {
+            this.refreshAll();
+        }
     }
 
    
