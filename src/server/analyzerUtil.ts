@@ -214,7 +214,7 @@ export class AnalyzerUtil {
 
     public static async loadAnalyzerResults(config: RhamtConfiguration, clearSummary: boolean = true, location ?: string): Promise<any> {
         return new Promise<void>(async (resolve, reject) => {
-            let results = null;
+           
             let  outPutPath = location || config.options['output'];
             try {
                 if (clearSummary) {
@@ -244,7 +244,6 @@ export class AnalyzerUtil {
                     await new Promise(poll);
 
                 }
-                results = await AnalyzerUtil.readAnalyzerResults(config, outPutPath);
                
             }
             catch (e) {
@@ -253,10 +252,13 @@ export class AnalyzerUtil {
                 return reject(`Error reading analyzer results.`);
             }
             try {
-                const analyzerResults = new AnalyzerResults(results, config);
+                const analyzerResults = new AnalyzerResults(config.incidentManager, config);
                 await analyzerResults.init();
                 config.results = analyzerResults;
                 if (clearSummary) {
+                    const incidentsMap = config.incidentManager.getIncidentsMap();
+                    const hintCount = Array.from(incidentsMap.values()).reduce((count, incidents) => count + incidents.length, 0);
+                    console.log(`----hintcount : ${hintCount}`);
                     config.summary = {
                         skippedReports: false,
                         outputLocation: outPutPath,
@@ -269,6 +271,7 @@ export class AnalyzerUtil {
                     config.summary.hintCount = config.results.model.hints.length;
                     config.summary.classificationCount = 0;
                     
+                    console.log(`--------- hintcount after: ${config.summary.hintCount}`);
                 }
                 return resolve();
             }

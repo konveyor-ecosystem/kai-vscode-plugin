@@ -5,6 +5,7 @@
 import { rhamtEvents } from '../events';
 import { AnalysisResultsSummary, AnalyzerResults } from './analyzerResults';
 import * as path from 'path';
+import { FileIncidentManager } from './fileIncidentUtil';
 
 export class RhamtModel {
 
@@ -70,7 +71,7 @@ export class RhamtConfiguration {
     rhamtExecutable: string;
     options: { [index: string]: any } = {};
     cancelled: boolean;
-
+    public incidentManager: FileIncidentManager | null = null;
     public _results: AnalyzerResults | null;
 
     get results(): AnalyzerResults | null {

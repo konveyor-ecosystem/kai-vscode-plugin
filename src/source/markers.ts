@@ -27,7 +27,9 @@ export class MarkerService {
         context.subscriptions.push(this.diagnostics);
         context.subscriptions.push(
             vscode.window.onDidChangeActiveTextEditor(editor => {
-                this.refreshHints(editor.document, editor);
+                if (editor) {
+                    this.refreshHints(editor.document, editor);
+                }
             })
         );
         context.subscriptions.push(
@@ -43,60 +45,62 @@ export class MarkerService {
     }
 
     public refreshOpenEditors(file?: string): void {
+        console.log(`Attempting to refresh open editors for file: ${file || "all files"}`);
+
         const activeEditor = vscode.window.activeTextEditor;
-        if (activeEditor) {
+        
+        // Refresh active editor if it's for the specific file or if no file is specified
+        if (activeEditor && (!file || activeEditor.document.uri.fsPath === file)) {
+            console.log(`Refreshing active editor for file: ${activeEditor.document.uri.fsPath}`);
             this.refreshHints(activeEditor.document, activeEditor);
         }
-        if (!file) {
-            vscode.window.visibleTextEditors.forEach(editor => {
-                if (editor != activeEditor) {
-                    this.refreshHints(editor.document, editor);
-                }
-            });
-        }
-        else {
-            vscode.window.visibleTextEditors.filter(editor => editor.document.uri.fsPath === file).forEach(editor => {
-                if (editor != activeEditor) {
-                    this.refreshHints(editor.document, editor);
-                }
-            }); 
-        }
+
+        // Refresh visible editors
+        vscode.window.visibleTextEditors.forEach(editor => {
+            console.log(`Checking visible editor for file: ${editor.document.uri.fsPath}`);
+            if (!file || editor.document.uri.fsPath === file) {
+                console.log(`Refreshing visible editor for file: ${editor.document.uri.fsPath}`);
+                this.refreshHints(editor.document, editor);
+            }
+        });
     }
 
     private refreshHints(doc: vscode.TextDocument, editor?: vscode.TextEditor): void {
         try {
+            console.log(`Refreshing hints for document: ${doc.uri.fsPath}`);
+            
             const diagnostics: vscode.Diagnostic[] = [];
             const decorations = [new vscode.Range(0, 0, 0, 0)];
             this.diagnostics.delete(doc.uri);
+            
             this.modelService.getActiveHints().filter(issue => doc.uri.fsPath === issue.file).forEach(issue => {
                 try {
                     const diagnostic = this.createDiagnostic(doc, issue);
                     if (diagnostic) {
                         diagnostics.push(diagnostic);
-                        const lineNumber = issue.lineNumber-1;
-                        const range = new vscode.Range(lineNumber, issue.column, lineNumber, issue.length+issue.column);
+                        const lineNumber = issue.lineNumber - 1;
+                        const range = new vscode.Range(lineNumber, issue.column, lineNumber, issue.length + issue.column);
                         decorations.push(range);
                     }
-                } 
-                catch (e) {
+                } catch (e) {
                     console.log('Error creating incident diagnostic.');
                     console.log(e);                    
                 }
             });
+            
             try {
                 if (diagnostics.length > 0) {
+                    console.log(`Setting ${diagnostics.length} diagnostics for document: ${doc.uri.fsPath}`);
                     this.diagnostics.set(doc.uri, diagnostics);
                 }
                 if (editor) {
                     editor.setDecorations(this.unfixedHintDecorationType, decorations);
                 }
-            }
-            catch (e) {
+            } catch (e) {
                 console.log('Error setting incident diagnostic.');
                 console.log(e);
             }
-        }
-        catch (e) {
+        } catch (e) {
             console.log(e);
         }
     }
@@ -110,37 +114,29 @@ export class MarkerService {
         }
         try {
             const severity = this.convertSeverity(issue);
-            const range = new vscode.Range(lineNumber, issue.column, lineNumber, issue.length+issue.column);
+            const range = new vscode.Range(lineNumber, issue.column, lineNumber, issue.length + issue.column);
             const title = issue.hint ? issue.hint : 'unknown-incident-title';
             console.log(`range - ${range}`);
-            console.log(range);
             console.log(`title - ${title}`);
             console.log(`severity ${severity}`);
             
-                        
             const diagnostic = new vscode.Diagnostic(range, title, severity);
             diagnostic.code = `${HINT} :: ${issue.configuration.id} :: ${issue.id}`;
             return diagnostic;
-        }
-        catch (e) {
-            console.log('Errir creating diagnostic.');            
+        } catch (e) {
+            console.log('Error creating diagnostic.');            
             console.log(e);
             return undefined;
         }
     }
 
     private convertSeverity(hint: IHint): vscode.DiagnosticSeverity {
-        
         let severity: vscode.DiagnosticSeverity = vscode.DiagnosticSeverity.Information;
         if (!hint.category || hint.category.includes('error') || hint.category.includes('mandatory')) {
             severity = vscode.DiagnosticSeverity.Error;
-        }
-        else if (hint.category.includes('potential')) {
+        } else if (hint.category.includes('potential')) {
             severity = vscode.DiagnosticSeverity.Warning;
         }
-        // else if (hint.complete) {
-        //     severity = vscode.DiagnosticSeverity.Hint;
-        // }
         return severity;
     }
 }

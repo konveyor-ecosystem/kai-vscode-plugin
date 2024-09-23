@@ -160,7 +160,6 @@ export class DataProvider implements TreeDataProvider<ITreeNode>, Disposable {
 
    
     public async populateRootNodes(): Promise<any[]> {
-       // window.showInformationMessage(`-------populateRootNodes------------`);
         let nodes: any[];
     
         try {
@@ -186,8 +185,6 @@ export class DataProvider implements TreeDataProvider<ITreeNode>, Disposable {
                     return node;
                 });
     
-                window.showInformationMessage(`Configurations: ${this.modelService.model.configurations.length}`);
-    
                 // Wait for configurations to load their results
                 await Promise.all(nodes.map(async node => {
                     if (node instanceof ConfigurationNode) {
@@ -199,14 +196,12 @@ export class DataProvider implements TreeDataProvider<ITreeNode>, Disposable {
                 for (const config of this.modelService.model.configurations) {
                     const configNode = this.getConfigurationNode(config);
                     if (configNode) {
-                       //window.showInformationMessage(`For each configNode map size: ${configNode.getFileNodeMap().size}`);
                         for (const [key, value] of configNode.getFileNodeMap()) {
                             allfileNodeMap.set(key, value);
                         }
                     }
                 }
                 this.kaiFix.updateFileNodes(allfileNodeMap);
-                window.showInformationMessage(`Total entries in combined fileNodeMap: ${allfileNodeMap.size}`);
     
             } else {
                 const item = new TreeItem('Loading...');

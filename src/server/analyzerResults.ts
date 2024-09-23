@@ -5,6 +5,7 @@
 import { ModelService } from '../model/modelService';
 import { IClassification, IHint, IIssue, IIssueType, IQuickFix, RhamtConfiguration } from './analyzerModel';
 import * as vscode from 'vscode';
+import { FileIncidentManager, Incident } from './fileIncidentUtil';
 
 export interface AnalysisResultsSummary {
     skippedReports?: boolean;
@@ -31,90 +32,100 @@ export class AnalyzerResults {
 
     reports: Map<string, string> = new Map<string, string>();
     config: RhamtConfiguration;
-    jsonResults: any;
+    incidentManager: FileIncidentManager; 
     private _model: AnalyzerResults.Model;
      
    
-    constructor(jsonResults: any, config: RhamtConfiguration) {
-        
-        this.jsonResults = jsonResults;
+    constructor(incidentManager: FileIncidentManager, config: RhamtConfiguration) {
+
         this.config = config;
+        this.incidentManager = incidentManager;
     }
 
     init(): Promise<void> {
+        // Initialize the model to store hints and classifications
         this._model = {
             hints: [],
             classifications: [],
             issueByFile: new Map<string, IHint[]>() 
         };
-        console.log(`Rulesets: ${this.jsonResults}`);
-       // const rulesets = this.jsonResults[0]['rulesets'];
-       const rulesets = this.jsonResults;
+    
+        // Create an output channel for logging
         const outputChannel1 = vscode.window.createOutputChannel("Analyzer Result");
-            outputChannel1.show(true);
-        rulesets.forEach(ruleset => {
-            const violations = ruleset.violations;
-            if (violations) {
-                Object.keys(violations).forEach(violationKey => {
-                    const violation = violations[violationKey];
-                    const incidents = violation.incidents;                    
-                    if (incidents) {
-                        incidents.forEach(incident => {
-                            const fileUri = vscode.Uri.parse(incident.uri as string);
-                            try {
-                                outputChannel1.appendLine(incident.violation);
-                                outputChannel1.appendLine (`Hint: ${JSON.stringify(incident.variables, null, 2)}`);
-                                const hint = {
-                                    type: IIssueType.Hint,
-                                    id: ModelService.generateUniqueId(),
-                                    quickfixes: [],
-                                   //then set as file : 
-                                    file: fileUri.fsPath,
-                                    severity: '',
-                                    ruleId: violationKey,
-                                    violationDiscription: violation.description, 
-                                    ruleSetDiscription: ruleset.description,
-                                    rulesetName: ruleset.name,
-                                    effort: '',
-                                    title: '',
-                                    links: [],
-                                    report: '',
-                                    lineNumber: incident.lineNumber || 1,
-                                    column: 0,
-                                    length: 0,
-                                    sourceSnippet: incident.codeSnip ? incident.codeSnip : '',
-                                    category: violation.category,
-                                    hint: incident.message,
-                                    configuration: this.config,
-                                    dom: incident,
-                                    complete: false,
-                                    origin: '',
-                                    variables: incident.variables ? incident.variables: '',
-                                };
-                                
-                                outputChannel1.appendLine (`Hint: ${JSON.stringify(hint.variables, null, 2)}`);
-                                this.model.hints.push(hint);
-                                const existingHintsForFile = this._model.issueByFile.get(fileUri.fsPath);
-                                if (existingHintsForFile) {
-                                    existingHintsForFile.push(hint);
-                                } else {
-                                    this._model.issueByFile.set(fileUri.fsPath, [hint]);
-                                    outputChannel1.appendLine (`ISSUEfILE Making new entry # ${this._model.issueByFile.size}`);
-                                    outputChannel1.appendLine (`ISSUEfILE Making new entry for ${fileUri.fsPath}`);
-                                }
-                            } catch (e) {
-                                console.log('error creating incident');
-                                console.log(e);
-                            } 
-                        });
+        outputChannel1.show(true);
+    
+        try {
+            if (!this.incidentManager) {
+                console.error('Incident Manager is undefined');
+                return;
+            }
+            // Get the incidents map from the incident manager
+            const incidentsMap = this.incidentManager.getIncidentsMap();
+    
+            // Log the incidents map for debugging
+            outputChannel1.appendLine(`Loaded incidents map with ${incidentsMap.size} files`);
+    
+            // Iterate over each file and its associated incidents
+            incidentsMap.forEach((incidents: Incident[], fileUri: string) => {
+                outputChannel1.appendLine(`Processing ${incidents.length} incidents for file: ${fileUri}`);
+    
+                // Iterate over each incident in the file
+                incidents.forEach(incident => {
+                    try {
+                        outputChannel1.appendLine(`Incident: ${JSON.stringify(incident, null, 2)}`);
+                        const hint: IHint = {
+                            type: IIssueType.Hint,
+                            id: ModelService.generateUniqueId(),
+                            quickfixes: [],
+                            file: vscode.Uri.parse(incident.uri).fsPath,
+                            severity: incident.severity ? incident.severity.toString() : '',
+                            ruleId: incident.ruleId || '',
+                            violationDiscription: incident.violationDescription || '',
+                            ruleSetDiscription: incident.ruleSetDescription || '',
+                            rulesetName: incident.rulesetName || '',
+                            effort: '',
+                            title: incident.message,
+                            links: [],
+                            report: '',
+                            lineNumber: incident.lineNumber || 1,
+                            column: 0,
+                            length: 0,
+                            sourceSnippet: incident.codeSnip ? incident.codeSnip : '',
+                            category: incident.category || '',
+                            hint: incident.message,
+                            configuration: this.config,
+                            dom: incident,
+                            complete: false,
+                            origin: '',
+                            variables: incident.variables ? incident.variables : {}
+                        };
+                        
+                        // Add the hint to the model
+                        this._model.hints.push(hint);
+    
+                        // Check if there are existing hints for this file
+                        const existingHintsForFile = this._model.issueByFile.get(fileUri);
+                        if (existingHintsForFile) {
+                            existingHintsForFile.push(hint);
+                        } else {
+                            this._model.issueByFile.set(fileUri, [hint]);
+                            outputChannel1.appendLine(`Created new entry for file: ${fileUri}`);
+                        }
+                    } catch (error) {
+                        console.error(`Error processing incident for file ${fileUri}:`, error);
+                        outputChannel1.appendLine(`Error processing incident: ${error.message}`);
                     }
                 });
-            }
-        }); 
-        outputChannel1.appendLine (`ISSUEBYFILE: ${JSON.stringify(this._model.issueByFile, null, 2)}`);      
-        return Promise.resolve();
+            });
+    
+            return Promise.resolve();
+        } catch (error) {
+            console.error('Error initializing analyzer results:', error);
+            outputChannel1.appendLine(`Error initializing analyzer results: ${error.message}`);
+            return Promise.reject(error);
+        }
     }
-
+    
     get model(): AnalyzerResults.Model | null {
         return this._model;
     }

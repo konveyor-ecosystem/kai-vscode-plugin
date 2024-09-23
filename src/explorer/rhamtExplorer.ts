@@ -14,6 +14,7 @@ import { providerChannel, rhamtChannel } from '../util/console';
 import * as path from "path";
 import * as fs from 'fs';
 import { FileNode } from '../tree/fileNode';
+import { FileIncidentManager } from '../server/fileIncidentUtil';
 
 export class RhamtExplorer {
     constructor(private context: ExtensionContext,
@@ -158,25 +159,27 @@ export class RhamtExplorer {
                 console.log(`Error setting up provider ${ProviderName.Java}`);
             }
         }));
+
         this.dataProvider.context.subscriptions.push(commands.registerCommand('rhamt.runConfiguration', async (item) => {
             if (!item) {
                 const configs = this.modelService.model.configurations.map(config => config.name);
                 const choice = await window.showQuickPick(configs);
                 if (choice) {
                     const config = this.modelService.getConfigurationWithName(choice);
-                    item = {config};
-                }
-                else {
+                    item = { config };
+                } else {
                     return;
-                }                
+                }
             }
             const config = item.config as RhamtConfiguration;
             const libPath = path.join(this.dataProvider.context.extensionPath, 'lib');
             try {
                 AnalyzerUtil.updateRunEnablement(false, this.dataProvider, config);
                 const providers = LocalProviderRunner.getInstance().providers();
-                await writeProviderSettingsFile(config.options['output'], 
-                    getProviderConfigs(providers, libPath, config.options['input']));
+                await writeProviderSettingsFile(
+                    config.options['output'],
+                    getProviderConfigs(providers, libPath, config.options['input'])
+                );
                 await AnalyzerUtil.analyze(
                     undefined,
                     false,
@@ -188,7 +191,8 @@ export class RhamtExplorer {
                         config.summary = undefined;
                         this.refreshConfigurations();
                     },
-                    () => {});
+                    () => { }
+                );
                 if (config.cancelled) {
                     rhamtChannel.print('\nAnalysis canceled');
                     return;
@@ -203,15 +207,23 @@ export class RhamtExplorer {
                 this.refreshConfigurations();
             }
             try {
-                await AnalyzerUtil.generateStaticReport(libPath, config, config.options['output'] );
+                await AnalyzerUtil.generateStaticReport(libPath, config, config.options['output']);
+
+                const outputYamlPath = path.join(config.options['output'], 'output.yaml');
+
+                const incidentManager = new FileIncidentManager(outputYamlPath, true);
+                incidentManager.logAllIncidents();
+                config.incidentManager = incidentManager;
+               
                 await AnalyzerUtil.loadAnalyzerResults(config);
+        
                 AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
                 const configNode = this.dataProvider.getConfigurationNode(config);
                 configNode.loadResults();
                 this.refreshConfigurations();
                 this.dataProvider.reveal(configNode, true);
                 this.markerService.refreshOpenEditors();
-                this.saveModel();
+                await this.saveModel();
                 rhamtChannel.print('\nAnalysis completed successfully');
                 window.showInformationMessage('Analysis complete', 'Open Report').then(result => {
                     if (result === 'Open Report') {
@@ -230,23 +242,35 @@ export class RhamtExplorer {
                 AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
                 this.refreshConfigurations();
             }
-
         }));
+
         this.dataProvider.context.subscriptions.push(commands.registerCommand('rhamt.rerun', async (item) => {
-            window.showInformationMessage(`rerun`);
             const fileNode = item as FileNode;
+            if (!fileNode) {
+                window.showErrorMessage('Invalid file node.');
+                return;
+            }
+        
             fileNode.setInProgress(true, "analyzing");
             const config = fileNode.config as RhamtConfiguration;
             const libPath = path.join(this.dataProvider.context.extensionPath, 'lib');
             const filePath = this.getRelativePath(fileNode.file, config.options['input'][0]);
-            const newOutputPath =  await this.createDirectoryForFile(config.options['output'],filePath);
-            window.showInformationMessage(`newOutputPath : ${newOutputPath}`);
+            const fileName = path.basename(filePath, path.extname(filePath));
+        
+            const newOutputPath = await this.createDirectoryForFile(config.options['output'], fileName);
+            console.log(`newOutputPath : ${newOutputPath}`);
+        
+            const relativeFilePath = path.relative(config.options['input'][0], fileNode.file);
+            console.log(`Relative file path: ${relativeFilePath}`);
+           
             try {
-                //AnalyzerUtil.updateRunEnablement(false, this.dataProvider, config);
                 const providers = LocalProviderRunner.getInstance().providers();
-
-                await writeProviderSettingsFile(newOutputPath,
-                    getProviderConfigs(providers, libPath, config.options['input'], filePath));
+        
+                await writeProviderSettingsFile(
+                    newOutputPath,
+                    getProviderConfigs(providers, libPath, config.options['input'], relativeFilePath)
+                );
+        
                 await AnalyzerUtil.analyze(
                     newOutputPath,
                     true,
@@ -257,51 +281,62 @@ export class RhamtExplorer {
                         config.results = undefined;
                         config.summary = undefined;
                     },
-                    () => {});
+                    () => {}
+                );
+        
                 if (config.cancelled) {
                     rhamtChannel.print(`\n Analysis canceled for File: ${filePath}`);
                     return;
-                };
+                }
             } catch (e) {
                 console.log(e);
                 rhamtChannel.print(`\n Analysis failed for File: ${filePath}`);
-                if (!e.notified) {
-                    window.showErrorMessage(`Error running analysis - ${e}`);
+                if (e.message) {
+                    window.showErrorMessage(`Error running analysis: ${e.message}`);
                 }
-               //AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
-               this.refreshConfigurations();
-               this.dataProvider.refreshNode(fileNode);
+                fileNode.setInProgress(false);
+                return;
             }
+        
             try {
                 await AnalyzerUtil.generateStaticReport(libPath, config, newOutputPath);
-                await AnalyzerUtil.loadAnalyzerResults(config, undefined ,newOutputPath);
-                AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
-                // const configNode = this.dataProvider.getConfigurationNode(config);
-                // configNode.loadResults();
-                fileNode.refresh();
-                this.refreshConfigurations();
-                this.dataProvider.refreshNode(fileNode);
-                // this.dataProvider.reveal(configNode, true);
-                this.markerService.refreshOpenEditors();
-                this.saveModel();
+           
+                let incidentManager = config.incidentManager;
+
+                const outputPath = config.options['output'];
+            
+                if (!incidentManager) {
+                    const outputYamlPath = path.join(outputPath, 'output.yaml');
+                    incidentManager = new FileIncidentManager(outputYamlPath, true);
+                    config.incidentManager = incidentManager;
+                }
+
+                const outputYamlFileForSpecificFile = path.join(newOutputPath, 'output.yaml');
+                await incidentManager.updateFileIncidents(outputYamlFileForSpecificFile, fileNode.file);
+
+                incidentManager.saveIncidentsToFile();
+
+                await AnalyzerUtil.loadAnalyzerResults(config);
+
+                this.dataProvider.refreshAll();
+        
+                this.markerService.refreshOpenEditors(fileNode.file);
+                await this.saveModel();
                 fileNode.setInProgress(false);
                 rhamtChannel.print('\nAnalysis completed successfully');
-
             } catch (e) {
                 console.log(e);
                 rhamtChannel.print('\nStatic report generation failed');
-                if (!e.notified) {
-                    window.showErrorMessage(`Error generating static report - ${e}`);
+                if (e.message) {
+                    window.showErrorMessage(`Error generating static report: ${e.message}`);
                 }
                 AnalyzerUtil.updateRunEnablement(true, this.dataProvider, config);
-                this.refreshConfigurations();
+                fileNode.setInProgress(false);
+                this.dataProvider.refreshNode(fileNode);  
             }
-
         }));
-
-        AnalyzerUtil.updateRunEnablement(true, this.dataProvider, null);
     }
-
+    
     private async saveModel(): Promise<void> {
         try {
             // save analysis results, quickfix info, active analysis, etc.
@@ -336,7 +371,7 @@ export class RhamtExplorer {
             input += '/';
         }
         fullPath.replace(input, '');
-        return path.dirname(fullPath);
+        return path.basename(fullPath);
     }
 
     async  createDirectoryForFile(outputPath: string, inputPath: string) {

@@ -2,7 +2,7 @@
  *  Copyright (c) Red Hat. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
-import { EventEmitter, ThemeColor, ThemeIcon, TreeItem, window } from 'vscode';
+import { EventEmitter, ThemeColor, ThemeIcon, TreeItem } from 'vscode';
 import { AbstractNode, ITreeNode } from './abstractNode';
 import { DataProvider } from './dataProvider';
 import { RhamtConfiguration } from '../server/analyzerModel';
@@ -84,13 +84,11 @@ export class FileNode extends AbstractNode<FileItem> {
                     this.treeItem.iconPath = new ThemeIcon('sync~spin', new ThemeColor('kaiFix.analyzing'));
                     this.treeItem.label = `Analyzing: ${path.basename(this.file)}`;
                     this.treeItem.tooltip = 'Analyzing Incidents';
-                    window.showInformationMessage(`FileNode is getting signal of Analyzing`);
                     break;
                 case 'fixing':
                     this.treeItem.iconPath = new ThemeIcon('loading~spin', new ThemeColor('kaiFix.fixing'));
                     this.treeItem.label = `Fixing: ${path.basename(this.file)}`;
                     this.treeItem.tooltip = 'Fixing Incidents';
-                    window.showInformationMessage(`FileNode is getting signal of Fixing`);
                     break;
                 default:
                     this.treeItem.iconPath = new ThemeIcon('sync~spin');

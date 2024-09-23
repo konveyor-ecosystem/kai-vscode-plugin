@@ -16,7 +16,7 @@ interface FileState {
     inProgress: boolean;
     taskExecution?: vscode.TaskExecution;
     tempFileUri?: Uri;
-    originalFilePath?: string;
+    originalFileUri?: Uri;
 }
 
 export class KaiFixDetails {
@@ -32,206 +32,218 @@ export class KaiFixDetails {
     private outputChannel: vscode.OutputChannel;
     private _fileNodes: Map<string, FileNode> = new Map();
 
-    constructor(context: ExtensionContext, private modelService: ModelService, fileNodeMap ?:  Map<string, FileNode> ) {
+    constructor(context: ExtensionContext, private modelService: ModelService, fileNodeMap?: Map<string, FileNode>) {
         this.context = context;
-        this.outputChannel = window.createOutputChannel("KaiFix Output");
+        this.outputChannel = window.createOutputChannel('KaiFix Output');
         this.taskProvider = new MyTaskProvider(this.outputChannel, this);
         this.myWebViewProvider = new MyWebViewProvider(this);
         this.registerContentProvider();
         this._fileNodes = fileNodeMap || new Map<string, FileNode>();
 
         const watcher = workspace.createFileSystemWatcher('**/*', false, false, false);
-        watcher.onDidChange(uri => {
+        watcher.onDidChange((uri) => {
             console.log(`File changed: ${uri.fsPath}`);
-            vscode.window.showInformationMessage(`File changed: ${uri.fsPath}`);
-            if (this._fileNodes.size == 0 ){
-                vscode.window.showInformationMessage(`fileNodes Size  zero=  ${this._fileNodes.size}`);
+            if (this._fileNodes.size == 0) {
+                console.log(`fileNodes Size zero=  ${this._fileNodes.size}`);
             }
-            vscode.window.showInformationMessage(`fileNodes map size =  ${this._fileNodes.size}`);
-            const fileNode = this._fileNodes.get(uri.fsPath); 
-            //const fileMap = this.globalRequestsManager.getFileMap();
-            this.modelService.dataProvider.refreshNode(fileNode);
+            console.log(`fileNodes map size =  ${this._fileNodes.size}`);
+            const fileNode = this._fileNodes.get(uri.fsPath);
+            if (fileNode) {
+                this.modelService.dataProvider.refreshNode(fileNode);
                 const request: Requests = {
                     id: incrementTaskCounter(),
-                    name: undefined,
+                    name: fileNode.file,
                     type: 'kantra',
                     file: fileNode.file,
-                    data: fileNode as FileNode
-                }; 
+                    data: fileNode as FileNode,
+                };
                 if (this.fileStateMap.get(fileNode.file)?.inProgress) {
-                    window.showInformationMessage(`Process already running for file: ${fileNode.file}, Cancelling current process and reanalyzing current changes!`);
-                    if (fileNode) {
-                                vscode.commands.executeCommand('rhamt.Stop', fileNode).then(() => {
-                                    addRequest(request);
-                                    this.taskProvider.processQueue();
-                                });  
-                        }
+                    window.showInformationMessage(
+                        `Process already running for file: ${fileNode.file}, Cancelling current process and reanalyzing current changes!`
+                    );
+                    vscode.commands.executeCommand('rhamt.Stop', fileNode).then(() => {
+                        addRequest(request);
+                        this.taskProvider.processQueue();
+                    });
                 } else {
-                    vscode.window.showInformationMessage(`No entry exists in Map, so adding...+ ${fileNode.file}`);
-                    // this.modelService.reload();
-                     //const config = fileNode.config; 
-                    // window.showInformationMessage(`config : ${config.name}`);
                     addRequest(request);
                     this.taskProvider.processQueue();
-                    
                 }
-    
+            }
         });
         context.subscriptions.push(watcher);
 
-        context.subscriptions.push(commands.registerCommand('rhamt.Stop', async item => {
-            const fileNode = item as FileNode;
-            this.taskProvider.stopTask(fileNode.file);
-            this.stopFileProcess(fileNode.file);
-        }));
-
-
         context.subscriptions.push(
-            window.registerWebviewViewProvider(
-                MyWebViewProvider.viewType,
-                this.myWebViewProvider
-            )
+            commands.registerCommand('rhamt.Stop', async (item) => {
+                const fileNode = item as FileNode;
+                this.taskProvider.stopTask(fileNode.file);
+                this.stopFileProcess(fileNode.file);
+            })
         );
 
-        context.subscriptions.push(commands.registerCommand('rhamt.acceptChanges', this.acceptChangesCommandHandler.bind(this)));
-        context.subscriptions.push(commands.registerCommand('rhamt.rejectChanges', this.rejectChangesCommandHandler.bind(this)));
+        context.subscriptions.push(
+            window.registerWebviewViewProvider(MyWebViewProvider.viewType, this.myWebViewProvider)
+        );
 
-        this.context.subscriptions.push(commands.registerCommand('rhamt.Kai-Fix-Files', async item => {
-            const fileNode = item as FileNode;
-            const filePath = fileNode.file;
+        context.subscriptions.push(
+            commands.registerCommand('rhamt.acceptChanges', this.acceptChangesCommandHandler.bind(this))
+        );
+        context.subscriptions.push(
+            commands.registerCommand('rhamt.rejectChanges', this.rejectChangesCommandHandler.bind(this))
+        );
 
-            if (this.fileStateMap.get(filePath)?.inProgress) {
-                window.showInformationMessage(`Process already running for file: ${filePath}`);
-                return;
-            }
+        this.context.subscriptions.push(
+            commands.registerCommand('rhamt.Kai-Fix-Files', async (item) => {
+                const fileNode = item as FileNode;
+                const filePath = fileNode.file;
 
-            const issueByFileMap = fileNode.getConfig()._results.model.issueByFile;
-            const issueByFile = issueByFileMap.get(fileNode.file);
-            const fs = require('fs').promises;
-            this.outputChannel.show(true);
-            const workspaceFolder = workspace.workspaceFolders[0].name;
-            this.outputChannel.appendLine("Generating the fix: ");
-            this.outputChannel.appendLine(`Appname Name: ${workspaceFolder}.`);
-            this.outputChannel.appendLine(`Incidents: ${JSON.stringify(this.formatHintsToIncidents(issueByFile), null, 2)}`);
-            const content = await fs.readFile(filePath, { encoding: 'utf8' });
+                if (this.fileStateMap.get(Uri.file(filePath).toString())?.inProgress) {
+                    window.showErrorMessage(`Process already running for file: ${filePath}`);
+                    return;
+                }
 
-            const incidents = issueByFile ? this.formatHintsToIncidents(issueByFile) : [];
+                const issueByFileMap = fileNode.getConfig()._results.model.issueByFile;
+                const issueByFile = issueByFileMap.get(fileNode.file);
+                const fs = require('fs').promises;
+                this.outputChannel.show(true);
+                const workspaceFolder = workspace.workspaceFolders[0].name;
+                this.outputChannel.appendLine('Generating the fix: ');
+                this.outputChannel.appendLine(`Appname Name: ${workspaceFolder}.`);
+                this.outputChannel.appendLine(
+                    `Incidents: ${JSON.stringify(this.formatHintsToIncidents(issueByFile), null, 2)}`
+                );
+                const content = await fs.readFile(filePath, { encoding: 'utf8' });
 
-            const postData = {
-                file_name: filePath.replace(workspace.workspaceFolders[0].uri.path + "/", ""),
-                file_contents: content,
-                application_name: workspaceFolder,
-                incidents: incidents,
-                include_llm_results: true
-            };
+                const incidents = issueByFile ? this.formatHintsToIncidents(issueByFile) : [];
 
-            const request: Requests = {
-                id: incrementTaskCounter(),
-                name: `KaiFixTask-${fileNode.file}`,
-                type: 'kai',
-                file: filePath,
-                data: postData
-            };
-            fileNode.setInProgress(true, "fixing");
-            addRequest(request);
-            this.taskProvider.processQueue();
-            fileNode.setInProgress(false);
-        }));
+                const postData = {
+                    file_name: filePath.replace(workspace.workspaceFolders[0].uri.path + '/', ''),
+                    file_contents: content,
+                    application_name: workspaceFolder,
+                    incidents: incidents,
+                    include_llm_results: true,
+                };
+
+                const request: Requests = {
+                    id: incrementTaskCounter(),
+                    name: `KaiFixTask-${fileNode.file}`,
+                    type: 'kai',
+                    file: filePath,
+                    data: postData,
+                };
+                fileNode.setInProgress(true, 'fixing');
+                addRequest(request);
+                this.taskProvider.processQueue();
+                fileNode.setInProgress(false);
+            })
+        );
     }
 
-    private normalizePath(filePath: string): string {
-        return path.normalize(filePath);
-    }
-
-    private updateFileState(filePath: string, state: Partial<FileState>) {
-        const normalizedPath = this.normalizePath(filePath);
-        const currentState = this.fileStateMap.get(normalizedPath) || { inProgress: false };
-        this.fileStateMap.set(normalizedPath, { ...currentState, ...state });
-        console.log(`Updated fileStateMap for: ${normalizedPath}`);
+    private updateFileState(fileUri: Uri, state: Partial<FileState>) {
+        const uriString = fileUri.toString();
+        const currentState = this.fileStateMap.get(uriString) || { inProgress: false };
+        this.fileStateMap.set(uriString, { ...currentState, ...state });
+        console.log(`Updated fileStateMap for: ${uriString}`);
     }
 
     private stopFileProcess(filePath: string) {
-        const normalizedPath = this.normalizePath(filePath);
-        window.showInformationMessage(`Stop requested for file: ${normalizedPath}`);
+        const fileUri = Uri.file(filePath);
+        window.showInformationMessage(`Stop requested for file: ${fileUri.toString()}`);
         this.taskProvider.stopTask(filePath);
-
     }
 
-    public handleTaskResult(filePath: string, result: any) {
+    public handleTaskResult(fileUri: Uri, result: any, requestType: string) {
         if (this.outputChannel) {
-            this.outputChannel.appendLine(`Result received for file ${filePath}: ${JSON.stringify(result)}`);
+            this.outputChannel.appendLine(`Result received for file ${fileUri.fsPath}: ${JSON.stringify(result)}`);
         }
-        this.updateFileState(filePath, { inProgress: false, taskExecution: undefined });
+        this.updateFileState(fileUri, { inProgress: false, taskExecution: undefined });
 
         if (result.error) {
             window.showErrorMessage(result.error);
             return;
         }
+        if (requestType === 'kai') {
+            const responseText = result.result;
+            console.log(responseText);
 
-        const responseText = result.result;
-        console.log(responseText);
+            const updatedFile = this.extractUpdatedFile(responseText);
 
-        const updatedFile = this.extractUpdatedFile(responseText);
-        const virtualDocumentUri = Uri.parse(`${this.kaiScheme}:${filePath}`);
+            const virtualDocumentUri = Uri.parse(`${this.kaiScheme}:${fileUri.fsPath}`);
 
-        const total_Reasoning = this.extractTotalReasoning(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Total Reasoning: ---- \n ${total_Reasoning}\n`);
-        }
-
-        const used_prompts = this.extractUsedPrompts(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Used Prompts: ---- \n${used_prompts}\n`);
-        }
-
-        const model_id = this.extractModelID(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Model Id: ---- \n${model_id}\n`);
-        }
-
-        const additional_information = this.extractAdditionalInformation(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Additional Information: ---- \n${additional_information}\n`);
-        }
-
-        const llm_results = this.extractLlmResults(responseText);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- LLM Result: ---- \n${llm_results}\n`);
-        }
-
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`---- Updated File: ---- \n${updatedFile}`);
-        }
-
-        const tempFileName = 'Kai-fix-All-' + this.getFileName(filePath);
-        if (this.outputChannel) {
-            this.outputChannel.appendLine(`Temp Filename: ${tempFileName}.`);
-        }
-
-        this.writeToTempFile(updatedFile, tempFileName).then((tempFileUri) => {
-            this.updateFileState(filePath, { tempFileUri, originalFilePath: filePath });
-
-            commands.executeCommand('vscode.diff', virtualDocumentUri, tempFileUri, `Current ⟷ KaiFix`, {
-                preview: false, // Disable preview mode
-            }).then(() => {
-                const editor = window.activeTextEditor;
-                if (editor) {
-                    this.openedDiffEditors.set(filePath, editor);
-                    this.watchDiffEditorClose();
-                    this.myWebViewProvider.updateWebview(true);
-                }
-            }, error => {
-                if (this.outputChannel) {
-                    this.outputChannel.appendLine(`Error opening diff view: ${error}`);
-                }
-                window.showErrorMessage(`Error opening diff view: ${error}`);
-            });
-        }, error => {
+            const total_Reasoning = this.extractTotalReasoning(responseText);
             if (this.outputChannel) {
-                this.outputChannel.appendLine(`Error writing to temp file: ${error}`);
+                this.outputChannel.appendLine(`---- Total Reasoning: ---- \n ${total_Reasoning}\n`);
             }
-            window.showErrorMessage(`Error writing to temp file: ${error}`);
-        });
+
+            const used_prompts = this.extractUsedPrompts(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Used Prompts: ---- \n${used_prompts}\n`);
+            }
+
+            const model_id = this.extractModelID(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Model Id: ---- \n${model_id}\n`);
+            }
+
+            const additional_information = this.extractAdditionalInformation(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Additional Information: ---- \n${additional_information}\n`);
+            }
+
+            const llm_results = this.extractLlmResults(responseText);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- LLM Result: ---- \n${llm_results}\n`);
+            }
+
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`---- Updated File: ---- \n${updatedFile}`);
+            }
+
+            const tempFileName = 'Kai-fix-All-' + path.basename(fileUri.fsPath);
+            if (this.outputChannel) {
+                this.outputChannel.appendLine(`Temp Filename: ${tempFileName}.`);
+            }
+
+            this.writeToTempFile(updatedFile, tempFileName).then(
+                (tempFileUri) => {
+                    this.updateFileState(fileUri, { tempFileUri, originalFileUri: fileUri });
+
+                    commands
+                        .executeCommand('vscode.diff', virtualDocumentUri, tempFileUri, `Current ⟷ KaiFix`, {
+                            preview: false, // Disable preview mode
+                        })
+                        .then(
+                            () => {
+                                const editor = window.activeTextEditor;
+                                if (editor) {
+                                    this.openedDiffEditors.set(fileUri.toString(), editor);
+                                    this.watchDiffEditorClose();
+                                    this.myWebViewProvider.updateWebview(true);
+                                }
+                            },
+                            (error) => {
+                                if (this.outputChannel) {
+                                    this.outputChannel.appendLine(`Error opening diff view: ${error}`);
+                                }
+                                window.showErrorMessage(`Error opening diff view: ${error}`);
+                            }
+                        );
+                },
+                (error) => {
+                    if (this.outputChannel) {
+                        this.outputChannel.appendLine(`Error writing to temp file: ${error}`);
+                    }
+                    window.showErrorMessage(`Error writing to temp file: ${error}`);
+                }
+            );
+        } else if (requestType === 'kantra') {
+            const fileNode = this._fileNodes.get(fileUri.fsPath);
+
+            if (fileNode) {
+                console.log(`Refreshing node for file: ${fileNode.file}`);
+                fileNode.refresh();
+            }
+        }
     }
 
     public updateFileNodes(fileNodeMap: Map<string, FileNode>): void {
@@ -249,35 +261,51 @@ export class KaiFixDetails {
 
     private watchDiffEditorClose(): void {
         this.context.subscriptions.push(window.onDidChangeActiveTextEditor(this.handleActiveEditorChange.bind(this)));
-        this.context.subscriptions.push(window.onDidChangeWindowState(windowState => {
-            if (windowState.focused) {
-                this.handleActiveEditorChange(window.activeTextEditor);
-            }
-        }));
+        this.context.subscriptions.push(
+            window.onDidChangeWindowState((windowState) => {
+                if (windowState.focused) {
+                    this.handleActiveEditorChange(window.activeTextEditor);
+                }
+            })
+        );
 
-        this.context.subscriptions.push(workspace.onDidCloseTextDocument(document => {
-            const closedPath = this.normalizePath(document.uri.fsPath);
-            if (this.openedDiffEditors.has(closedPath)) {
-                this.openedDiffEditors.delete(closedPath);
-            }
-        }));
+        this.context.subscriptions.push(
+            workspace.onDidCloseTextDocument((document) => {
+                const closedUriString = document.uri.toString();
+                if (this.openedDiffEditors.has(closedUriString)) {
+                    this.openedDiffEditors.delete(closedUriString);
+                }
+            })
+        );
     }
 
     private handleActiveEditorChange(editor?: TextEditor): void {
         if (!editor) {
+            this.myWebViewProvider.updateWebview(false);
             return;
         }
 
-        const activeDocumentUri = editor.document.uri;
-        const normalizedPath = this.normalizePath(activeDocumentUri.fsPath);
-        console.log(`Active editor path (normalized): ${normalizedPath}`);
+        const documentUri = editor.document.uri;
+        const uriString = documentUri.toString();
 
-        const isDiffFocused = this.openedDiffEditors.has(normalizedPath);
+        let isDiffFocused = false;
+        for (const state of this.fileStateMap.values()) {
+            if (
+                state.tempFileUri?.toString() === uriString ||
+                state.originalFileUri?.toString() === uriString
+            ) {
+                isDiffFocused = true;
+                break;
+            }
+        }
+
         this.myWebViewProvider.updateWebview(isDiffFocused);
     }
 
     private async saveSpecificFile(tempFileUri: Uri): Promise<boolean> {
-        const editor = window.visibleTextEditors.find(editor => this.normalizePath(editor.document.uri.toString()) === this.normalizePath(tempFileUri.toString()));
+        const editor = window.visibleTextEditors.find(
+            (editor) => editor.document.uri.toString() === tempFileUri.toString()
+        );
         if (editor) {
             await commands.executeCommand('workbench.action.files.save');
             return true;
@@ -287,8 +315,8 @@ export class KaiFixDetails {
 
     private async applyChangesAndDeleteTempFile(originalFileUri: Uri, tempFileUri: Uri): Promise<void> {
         try {
-            // Check if the temp file exists before attempting to save or delete
-            const tempFileExists = await workspace.fs.stat(tempFileUri)
+            const tempFileExists = await workspace.fs
+                .stat(tempFileUri)
                 .then(() => true, () => false);
 
             if (!tempFileExists) {
@@ -298,15 +326,15 @@ export class KaiFixDetails {
 
             const saved = await this.saveSpecificFile(tempFileUri);
             if (saved) {
-                window.showInformationMessage('Temp file saved.');
+                console.log('Temp file saved.');
             } else {
-                window.showInformationMessage('Temp file was not open in an editor, or it was not dirty.');
+                console.log('Temp file was not open in an editor, or it was not dirty.');
             }
 
             const tempFileContent = await workspace.fs.readFile(tempFileUri);
             await workspace.fs.writeFile(originalFileUri, tempFileContent);
             await workspace.fs.delete(tempFileUri);
-            await this.closeEditor(this.openedDiffEditors.get(this.normalizePath(originalFileUri.fsPath)));
+            await this.closeEditor(this.openedDiffEditors.get(originalFileUri.toString()));
             window.showInformationMessage('Changes applied successfully.');
         } catch (error) {
             console.error('Failed to apply changes or delete temporary file:', error);
@@ -325,8 +353,8 @@ export class KaiFixDetails {
 
     private async rejectChangesAndDeleteTempFile(tempFileUri: Uri): Promise<void> {
         try {
-            // Check if the temp file exists before attempting to delete
-            const tempFileExists = await workspace.fs.stat(tempFileUri)
+            const tempFileExists = await workspace.fs
+                .stat(tempFileUri)
                 .then(() => true, () => false);
 
             if (!tempFileExists) {
@@ -350,11 +378,11 @@ export class KaiFixDetails {
                 const updatedFileContent = responseObj.updated_file;
                 return updatedFileContent || 'No content available in updated_file.';
             } else {
-                window.showInformationMessage('The "updated_file" property does not exist in the response object.');
+                console.log('The "updated_file" property does not exist in the response object.');
                 return 'The "updated_file" property does not exist in the response object.';
             }
         } catch (error) {
-            window.showInformationMessage('Failed to parse jsonResponse:', error);
+            window.showErrorMessage('Failed to parse jsonResponse:', error);
             return 'An error occurred while parsing the JSON response.';
         }
     }
@@ -366,11 +394,11 @@ export class KaiFixDetails {
                 const total_reasoningContent = responseObj.total_reasoning;
                 return total_reasoningContent || 'No content available in total_reasoning.';
             } else {
-                window.showInformationMessage('The "total_reasoning" property does not exist in the response object.');
+                console.log('The "total_reasoning" property does not exist in the response object.');
                 return 'The "total_reasoning" property does not exist in the response object.';
             }
         } catch (error) {
-            window.showInformationMessage('Failed to parse jsonResponse:', error);
+            window.showErrorMessage('Failed to parse jsonResponse:', error);
             return 'An error occurred while parsing the JSON response.';
         }
     }
@@ -382,11 +410,11 @@ export class KaiFixDetails {
                 const used_promptsContent = responseObj.used_prompts;
                 return used_promptsContent || 'No content available in used_prompts.';
             } else {
-                window.showInformationMessage('The "used_prompts" property does not exist in the response object.');
+                console.log('The "used_prompts" property does not exist in the response object.');
                 return 'The "used_prompts" property does not exist in the response object.';
             }
         } catch (error) {
-            window.showInformationMessage('Failed to parse jsonResponse:', error);
+            window.showErrorMessage('Failed to parse jsonResponse:', error);
             return 'An error occurred while parsing the JSON response.';
         }
     }
@@ -398,11 +426,11 @@ export class KaiFixDetails {
                 const model_idContent = responseObj.model_id;
                 return model_idContent || 'No content available in model_id.';
             } else {
-                window.showInformationMessage('The "model_id" property does not exist in the response object.');
+                console.log('The "model_id" property does not exist in the response object.');
                 return 'The "model_id" property does not exist in the response object.';
             }
         } catch (error) {
-            window.showInformationMessage('Failed to parse jsonResponse:', error);
+            window.showErrorMessage('Failed to parse jsonResponse:', error);
             return 'An error occurred while parsing the JSON response.';
         }
     }
@@ -414,11 +442,13 @@ export class KaiFixDetails {
                 const additional_informationContent = responseObj.additional_information;
                 return additional_informationContent || 'No content available in additional_information.';
             } else {
-                window.showInformationMessage('The "additional_information" property does not exist in the response object.');
+                console.log(
+                    'The "additional_information" property does not exist in the response object.'
+                );
                 return 'The "additional_information" property does not exist in the response object.';
             }
         } catch (error) {
-            window.showInformationMessage('Failed to parse jsonResponse:', error);
+            window.showErrorMessage('Failed to parse jsonResponse:', error);
             return 'An error occurred while parsing the JSON response.';
         }
     }
@@ -430,19 +460,13 @@ export class KaiFixDetails {
                 const llm_resultsContent = responseObj.llm_results;
                 return llm_resultsContent || 'No content available in llm_results.';
             } else {
-                window.showInformationMessage('The "llm_results" property does not exist in the response object.');
+                console.log('The "llm_results" property does not exist in the response object.');
                 return 'The "llm_results" property does not exist in the response object.';
             }
         } catch (error) {
-            window.showInformationMessage('Failed to parse jsonResponse:', error);
+            window.showErrorMessage('Failed to parse jsonResponse:', error);
             return 'An error occurred while parsing the JSON response.';
         }
-    }
-
-    private getFileName(filePath: string): string {
-        const segments = filePath.split('/');
-        const fileName = segments.pop();
-        return fileName || '';
     }
 
     private registerContentProvider() {
@@ -450,9 +474,8 @@ export class KaiFixDetails {
             onDidChangeEmitter = new EventEmitter<Uri>();
             onDidChange = this.onDidChangeEmitter.event;
             provideTextDocumentContent(uri: Uri): Thenable<string> {
-                const filePath = uri.path;
-                const fileUri = Uri.file(filePath);
-                return workspace.fs.readFile(fileUri).then(buffer => {
+                const fileUri = Uri.file(uri.path);
+                return workspace.fs.readFile(fileUri).then((buffer) => {
                     return buffer.toString();
                 });
             }
@@ -468,39 +491,42 @@ export class KaiFixDetails {
 
     public async acceptChangesCommandHandler(): Promise<void> {
         if (!this.openedDiffEditors || this.openedDiffEditors.size === 0) {
-            window.showErrorMessage("No diff editor is currently open.");
+            window.showErrorMessage('No diff editor is currently open.');
             return;
         }
 
         const activeEditor = window.activeTextEditor;
         if (!activeEditor) {
-            window.showErrorMessage("No active editor found.");
+            window.showErrorMessage('No active editor found.');
             return;
         }
 
-        const activeEditorPath = this.normalizePath(activeEditor.document.uri.fsPath);
-        console.log(`Active editor path (normalized): ${activeEditorPath}`);
+        const documentUri = activeEditor.document.uri;
+        const uriString = documentUri.toString();
 
-        console.log('Current fileStateMap keys:', Array.from(this.fileStateMap.keys()));
+        let targetState: FileState | undefined;
+        for (const state of this.fileStateMap.values()) {
+            if (
+                state.tempFileUri?.toString() === uriString ||
+                state.originalFileUri?.toString() === uriString
+            ) {
+                targetState = state;
+                break;
+            }
+        }
 
-        const fileState = this.fileStateMap.get(activeEditorPath);
-
-        if (!fileState || !fileState.tempFileUri || !fileState.originalFilePath) {
-            console.log(`No matching fileState found for: ${activeEditorPath}`);
-            window.showErrorMessage("No changes to apply.");
+        if (!targetState || !targetState.tempFileUri || !targetState.originalFileUri) {
+            window.showErrorMessage('No changes to apply.');
             return;
         }
 
-        console.log(`Applying changes for file: ${fileState.originalFilePath}`);
-        const originalFileUri = Uri.file(fileState.originalFilePath);
-        await this.applyChangesAndDeleteTempFile(originalFileUri, fileState.tempFileUri);
-        
-        // Reset the state for the accepted file
-        this.fileStateMap.delete(activeEditorPath);
-        this.openedDiffEditors.delete(activeEditorPath);
-        
+        await this.applyChangesAndDeleteTempFile(targetState.originalFileUri, targetState.tempFileUri);
+
+        // Clean up state
+        this.fileStateMap.delete(targetState.originalFileUri.toString());
+        this.openedDiffEditors.delete(targetState.originalFileUri.toString());
+
         this.myWebViewProvider.updateWebview(false);
-
         this.refreshButtonsForRemainingFiles();
     }
 
@@ -515,32 +541,36 @@ export class KaiFixDetails {
     public async rejectChangesCommandHandler(): Promise<void> {
         const activeEditor = window.activeTextEditor;
         if (!activeEditor) {
-            window.showErrorMessage("No active editor found.");
+            window.showErrorMessage('No active editor found.');
             return;
         }
 
-        const activeEditorPath = this.normalizePath(activeEditor.document.uri.fsPath);
-        console.log(`Active editor path (normalized) for reject: ${activeEditorPath}`);
+        const documentUri = activeEditor.document.uri;
+        const uriString = documentUri.toString();
 
-        console.log('Current fileStateMap keys:', Array.from(this.fileStateMap.keys()));
+        let targetState: FileState | undefined;
+        for (const state of this.fileStateMap.values()) {
+            if (
+                state.tempFileUri?.toString() === uriString ||
+                state.originalFileUri?.toString() === uriString
+            ) {
+                targetState = state;
+                break;
+            }
+        }
 
-        const fileState = this.fileStateMap.get(activeEditorPath);
-
-        if (!fileState || !fileState.tempFileUri) {
-            console.log(`No matching fileState found for: ${activeEditorPath}`);
-            window.showErrorMessage("No changes to reject.");
+        if (!targetState || !targetState.tempFileUri) {
+            window.showErrorMessage('No changes to reject.');
             return;
         }
 
-        console.log(`Rejecting changes for file: ${fileState.originalFilePath}`);
+        await this.rejectChangesAndDeleteTempFile(targetState.tempFileUri);
 
-        await this.rejectChangesAndDeleteTempFile(fileState.tempFileUri);
-     
-        this.fileStateMap.delete(activeEditorPath);
-        this.openedDiffEditors.delete(activeEditorPath);
+        // Clean up state
+        this.fileStateMap.delete(targetState.originalFileUri.toString());
+        this.openedDiffEditors.delete(targetState.originalFileUri.toString());
 
         this.myWebViewProvider.updateWebview(false);
-
         this.refreshButtonsForRemainingFiles();
     }
 
@@ -556,13 +586,13 @@ export class KaiFixDetails {
     }
 
     private formatHintsToIncidents(hints: IHint[]) {
-        return hints.map(hint => ({
+        return hints.map((hint) => ({
             ruleset_name: hint.rulesetName,
-            ruleset_description: hint.ruleSetDiscription || 'No Discription', 
-            violation_name: hint.ruleId,     
-            violation_description: hint.violationDiscription || 'No Discription',
-            uri : hint.file || '',
-            message: hint.hint || 'No message', 
+            ruleset_description: hint.ruleSetDiscription || 'No Description',
+            violation_name: hint.ruleId,
+            violation_description: hint.violationDiscription || 'No Description',
+            uri: hint.file || '',
+            message: hint.hint || 'No message',
         }));
     }
 }
@@ -581,22 +611,24 @@ export class MyWebViewProvider implements vscode.WebviewViewProvider {
     public resolveWebviewView(
         webviewView: vscode.WebviewView,
         context: vscode.WebviewViewResolveContext,
-        token: vscode.CancellationToken,
+        token: vscode.CancellationToken
     ): void {
         this._view = webviewView;
         this._view.webview.options = { enableScripts: true };
         this._view.webview.html = this.getDefaultHtmlForWebview();
 
-        this._view.webview.onDidReceiveMessage(async (message) => {
-            await this.kaiFixDetails.handleMessage(message);
-        }, undefined, this.kaiFixDetails.context.subscriptions);
+        this._view.webview.onDidReceiveMessage(
+            async (message) => {
+                await this.kaiFixDetails.handleMessage(message);
+            },
+            undefined,
+            this.kaiFixDetails.context.subscriptions
+        );
     }
 
     public updateWebview(diffFocused: boolean): void {
         if (this._view) {
-            this._view.webview.html = diffFocused
-                ? this.getHtmlForWebview()
-                : this.getDefaultHtmlForWebview();
+            this._view.webview.html = diffFocused ? this.getHtmlForWebview() : this.getDefaultHtmlForWebview();
         }
     }
 
