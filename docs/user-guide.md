@@ -75,7 +75,7 @@ Only follow these steps if you decided to skip installing from the UI side and y
 2. Set the configuration parameters as shown below:
 - Input: path to coolstore app
 - CLI: `kantra`
-- Target: `containerization`, `jakarta-ee`, `jakarta-ee8+`, `jakarta-ee9+`, `quarkus` (if your target is unavailable, click "Add", type your target, and hit enter)
+- Target: `jakarta-ee`, `quarkus`
 - Rules: Navigate to the path [custom_rules](https://github.com/konveyor-ecosystem/kai/tree/main/samples/custom_rules)
 3. Click the `Run` button to start the analysis.
 4. Wait for the analysis to complete successfully (expect about 2-3 minutes).
